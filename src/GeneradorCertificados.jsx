@@ -15,13 +15,12 @@ import {
   flexRender,
 } from '@tanstack/react-table';
 
-const CANVAS_WIDTH = 2000;
-const CANVAS_HEIGHT = 1414;
-
 function GeneradorCertificados() {
   // Estados para los diferentes pasos
   const [step, setStep] = useState(1);
   const [backgroundImage, setBackgroundImage] = useState(null);
+  const [canvasWidth, setCanvasWidth] = useState(2000);
+  const [canvasHeight, setCanvasHeight] = useState(1414);
   const [excelData, setExcelData] = useState([]);
   const [excelHeaders, setExcelHeaders] = useState([]);
   const [fields, setFields] = useState([]);
@@ -52,18 +51,26 @@ function GeneradorCertificados() {
     reader.onload = (event) => {
       const img = new Image();
       img.onload = () => {
-        // Redimensionar a 2000x1414 (formato Canva)
+        // Detectar dimensiones originales de la imagen
+        const originalWidth = img.width;
+        const originalHeight = img.height;
+
+        // Actualizar estados con las dimensiones reales
+        setCanvasWidth(originalWidth);
+        setCanvasHeight(originalHeight);
+
+        // Guardar imagen en sus dimensiones originales
         const canvas = document.createElement('canvas');
-        canvas.width = CANVAS_WIDTH;
-        canvas.height = CANVAS_HEIGHT;
+        canvas.width = originalWidth;
+        canvas.height = originalHeight;
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        ctx.drawImage(img, 0, 0, originalWidth, originalHeight);
 
-        const resizedImage = canvas.toDataURL('image/png');
-        setBackgroundImage(resizedImage);
+        const imageData = canvas.toDataURL('image/png');
+        setBackgroundImage(imageData);
 
-        // Toast de éxito
-        toast.success('✓ Imagen cargada y redimensionada a 2000x1414px');
+        // Toast de éxito con dimensiones reales
+        toast.success(`✓ Imagen cargada: ${originalWidth}x${originalHeight}px`);
       };
       img.src = event.target.result;
     };
@@ -176,8 +183,8 @@ function GeneradorCertificados() {
   const addFieldFromModal = () => {
     const newField = {
       id: Date.now(),
-      x: CANVAS_WIDTH / 2 - 100,
-      y: CANVAS_HEIGHT / 2,
+      x: canvasWidth / 2,
+      y: canvasHeight / 2,
       columnIndex: newFieldType === 'data' ? newFieldColumnIndex : 0,
       customText: newFieldType === 'static' ? newFieldStaticText : '',
       fontSize: 32,
@@ -186,7 +193,7 @@ function GeneradorCertificados() {
       fontWeight: 'normal',
       fontStyle: 'normal',
       textDecoration: 'none',
-      textAlign: 'left',
+      textAlign: 'center',
       fieldType: newFieldType, // 'data' o 'static'
     };
     setFields([...fields, newField]);
@@ -219,8 +226,8 @@ function GeneradorCertificados() {
   const handleCanvasMouseDown = (e) => {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
-    const scaleX = CANVAS_WIDTH / rect.width;
-    const scaleY = CANVAS_HEIGHT / rect.height;
+    const scaleX = canvasWidth / rect.width;
+    const scaleY = canvasHeight / rect.height;
     const mouseX = (e.clientX - rect.left) * scaleX;
     const mouseY = (e.clientY - rect.top) * scaleY;
 
@@ -270,8 +277,8 @@ function GeneradorCertificados() {
 
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
-    const scaleX = CANVAS_WIDTH / rect.width;
-    const scaleY = CANVAS_HEIGHT / rect.height;
+    const scaleX = canvasWidth / rect.width;
+    const scaleY = canvasHeight / rect.height;
     const mouseX = (e.clientX - rect.left) * scaleX;
     const mouseY = (e.clientY - rect.top) * scaleY;
 
@@ -309,10 +316,10 @@ function GeneradorCertificados() {
     if (step >= 3 && backgroundImageRef.current) {
       const render = () => {
         // Limpiar canvas
-        ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
         // Dibujar imagen de fondo cacheada
-        ctx.drawImage(backgroundImageRef.current, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        ctx.drawImage(backgroundImageRef.current, 0, 0, canvasWidth, canvasHeight);
 
         // Dibujar campos
         fields.forEach(field => {
@@ -369,12 +376,12 @@ function GeneradorCertificados() {
       // Para fase 1 y 2, renderizar directamente sin cache
       const img = new Image();
       img.onload = () => {
-        ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-        ctx.drawImage(img, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+        ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
       };
       img.src = backgroundImage;
     }
-  }, [fields, selectedFieldId, step, excelData, previewIndex, backgroundImage]);
+  }, [fields, selectedFieldId, step, excelData, previewIndex, backgroundImage, canvasWidth, canvasHeight]);
 
   // PASO 5: Generar todos los certificados
   const generateAllCertificates = async () => {
@@ -386,8 +393,8 @@ function GeneradorCertificados() {
 
       const zip = new JSZip();
       const canvas = document.createElement('canvas');
-      canvas.width = CANVAS_WIDTH;
-      canvas.height = CANVAS_HEIGHT;
+      canvas.width = canvasWidth;
+      canvas.height = canvasHeight;
       const ctx = canvas.getContext('2d');
 
       const img = new Image();
@@ -405,10 +412,10 @@ function GeneradorCertificados() {
         const rowData = excelData[i];
 
         // Limpiar canvas
-        ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
         // Dibujar imagen de fondo
-        ctx.drawImage(img, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
 
         // Dibujar cada campo de texto
         fields.forEach(field => {
@@ -703,7 +710,7 @@ function GeneradorCertificados() {
                   </div>
                   <h2 className="text-4xl font-bold text-gray-800 mb-3">Sube tu imagen de fondo</h2>
                   <p className="text-gray-600 text-lg">
-                    La imagen se redimensionará automáticamente a <span className="font-semibold text-purple-600">2000x1414px</span>
+                    La imagen mantendrá sus <span className="font-semibold text-purple-600">dimensiones originales</span>
                   </p>
                 </div>
 
@@ -732,14 +739,14 @@ function GeneradorCertificados() {
                   <div className="inline-block bg-green-100 text-green-700 px-4 py-2 rounded-full text-sm font-semibold mb-2">
                     ✓ Imagen cargada correctamente
                   </div>
-                  <p className="text-gray-600 text-sm">Dimensiones: 2000x1414px</p>
+                  <p className="text-gray-600 text-sm">Dimensiones: {canvasWidth}x{canvasHeight}px</p>
                 </div>
 
                 <div className="mb-8 bg-white shadow-2xl rounded-2xl p-3 ring-1 ring-gray-200">
                   <canvas
                     ref={canvasRef}
-                    width={CANVAS_WIDTH}
-                    height={CANVAS_HEIGHT}
+                    width={canvasWidth}
+                    height={canvasHeight}
                     className="max-h-[70vh] w-auto rounded-lg"
                     style={{ maxWidth: '90vw' }}
                   />
@@ -1280,8 +1287,8 @@ function GeneradorCertificados() {
               <div className="bg-white shadow-2xl rounded-lg p-2">
                 <canvas
                   ref={canvasRef}
-                  width={CANVAS_WIDTH}
-                  height={CANVAS_HEIGHT}
+                  width={canvasWidth}
+                  height={canvasHeight}
                   onMouseDown={handleCanvasMouseDown}
                   onMouseMove={handleCanvasMouseMove}
                   onMouseUp={handleCanvasMouseUp}
@@ -1330,8 +1337,8 @@ function GeneradorCertificados() {
               <div className="bg-white shadow-2xl rounded-lg p-2">
                 <canvas
                   ref={canvasRef}
-                  width={CANVAS_WIDTH}
-                  height={CANVAS_HEIGHT}
+                  width={canvasWidth}
+                  height={canvasHeight}
                   className="max-h-[75vh] w-auto"
                   style={{ maxWidth: '90vw' }}
                 />
