@@ -453,9 +453,12 @@ function GeneradorCertificados() {
         // Convertir canvas a imagen base64 (JPEG con compresión para reducir tamaño)
         const imgData = canvas.toDataURL('image/jpeg', 0.85);
 
-        // Crear PDF con jsPDF (tamaño A4 horizontal)
+        // Detectar orientación basándose en las dimensiones del canvas
+        const orientation = canvasWidth > canvasHeight ? 'landscape' : 'portrait';
+
+        // Crear PDF con jsPDF (orientación automática según imagen)
         const pdf = new jsPDF({
-          orientation: 'landscape',
+          orientation: orientation,
           unit: 'mm',
           format: 'a4'
         });
@@ -1398,7 +1401,7 @@ function GeneradorCertificados() {
                     <ul className="text-sm text-purple-800 space-y-2">
                       <li className="flex items-start gap-2">
                         <span className="text-purple-600">•</span>
-                        <span>Formato: ZIP con archivos PDF (A4 horizontal)</span>
+                        <span>Formato: ZIP con archivos PDF (A4 {canvasWidth > canvasHeight ? 'horizontal' : 'vertical'})</span>
                       </li>
                       <li className="flex items-start gap-2">
                         <span className="text-purple-600">•</span>
