@@ -318,6 +318,10 @@ function GeneradorCertificados() {
         // Limpiar canvas
         ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
+        // Agregar fondo blanco para PNG con transparencia
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
         // Dibujar imagen de fondo cacheada
         ctx.drawImage(backgroundImageRef.current, 0, 0, canvasWidth, canvasHeight);
 
@@ -377,6 +381,9 @@ function GeneradorCertificados() {
       const img = new Image();
       img.onload = () => {
         ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+        // Agregar fondo blanco para PNG con transparencia
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
         ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
       };
       img.src = backgroundImage;
@@ -413,6 +420,10 @@ function GeneradorCertificados() {
 
         // Limpiar canvas
         ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+        // Agregar fondo blanco para PNG con transparencia
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
         // Dibujar imagen de fondo
         ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
