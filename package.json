@@ -17,6 +17,7 @@
     "libarchive.js": "^2.0.2",
     "lucide-react": "^0.545.0",
     "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^5.4.449",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-hot-toast": "^2.6.0",

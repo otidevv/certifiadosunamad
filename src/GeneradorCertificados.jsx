@@ -3,9 +3,16 @@ import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import { jsPDF } from 'jspdf';
+import * as pdfjsLib from 'pdfjs-dist';
 import { Upload, Plus, Trash2, ChevronLeft, ChevronRight, Download, Check, Search, ArrowUpDown, FileSpreadsheet, Bold, Italic, Type, X, Database, FileText, Underline, AlignLeft, AlignCenter, AlignRight, Wrench } from 'lucide-react';
 import Swal from 'sweetalert2';
 import toast, { Toaster } from 'react-hot-toast';
+
+// Configurar worker de PDF.js
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url
+).toString();
 import {
   useReactTable,
   getCoreRowModel,
@@ -42,39 +49,102 @@ function GeneradorCertificados() {
   const excelInputRef = useRef(null);
   const backgroundImageRef = useRef(null);
 
-  // PASO 1: Manejar carga de imagen de fondo
-  const handleImageUpload = (e) => {
+  // Función para convertir la primera página de un PDF a imagen
+  const convertPdfToImage = async (file) => {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const page = await pdf.getPage(1);
+
+    // Calcular escala para obtener 2000px de ancho
+    const originalViewport = page.getViewport({ scale: 1 });
+    const targetWidth = 2000;
+    const scale = targetWidth / originalViewport.width;
+    const viewport = page.getViewport({ scale });
+
+    // Crear canvas para renderizar
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    const ctx = canvas.getContext('2d');
+
+    // Fondo blanco (los PDFs pueden tener transparencia)
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Renderizar la página del PDF al canvas
+    await page.render({
+      canvasContext: ctx,
+      viewport: viewport,
+    }).promise;
+
+    // Convertir a base64 PNG
+    const imageData = canvas.toDataURL('image/png');
+
+    return {
+      imageData,
+      width: canvas.width,
+      height: canvas.height,
+    };
+  };
+
+  // PASO 1: Manejar carga de imagen de fondo (soporta imágenes y PDF)
+  const handleImageUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        // Detectar dimensiones originales de la imagen
-        const originalWidth = img.width;
-        const originalHeight = img.height;
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
 
-        // Actualizar estados con las dimensiones reales
-        setCanvasWidth(originalWidth);
-        setCanvasHeight(originalHeight);
+    if (isPdf) {
+      // Procesar archivo PDF
+      try {
+        toast.loading('Procesando PDF...', { id: 'pdf-loading' });
 
-        // Guardar imagen en sus dimensiones originales
-        const canvas = document.createElement('canvas');
-        canvas.width = originalWidth;
-        canvas.height = originalHeight;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, originalWidth, originalHeight);
+        const result = await convertPdfToImage(file);
 
-        const imageData = canvas.toDataURL('image/png');
-        setBackgroundImage(imageData);
+        setCanvasWidth(result.width);
+        setCanvasHeight(result.height);
+        setBackgroundImage(result.imageData);
 
-        // Toast de éxito con dimensiones reales
-        toast.success(`✓ Imagen cargada: ${originalWidth}x${originalHeight}px`);
+        toast.dismiss('pdf-loading');
+        toast.success(`✓ PDF cargado: ${result.width}x${result.height}px (página 1)`);
+      } catch (error) {
+        toast.dismiss('pdf-loading');
+        console.error('Error al procesar PDF:', error);
+        Swal.fire({
+          title: 'Error al procesar PDF',
+          text: 'No se pudo convertir el PDF a imagen. Asegúrate de que el archivo sea un PDF válido.',
+          icon: 'error',
+          confirmButtonColor: '#9333ea',
+          confirmButtonText: 'Entendido'
+        });
+      }
+    } else {
+      // Procesar archivo de imagen (código existente)
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const originalWidth = img.width;
+          const originalHeight = img.height;
+
+          setCanvasWidth(originalWidth);
+          setCanvasHeight(originalHeight);
+
+          const canvas = document.createElement('canvas');
+          canvas.width = originalWidth;
+          canvas.height = originalHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, originalWidth, originalHeight);
+
+          const imageData = canvas.toDataURL('image/png');
+          setBackgroundImage(imageData);
+
+          toast.success(`✓ Imagen cargada: ${originalWidth}x${originalHeight}px`);
+        };
+        img.src = event.target.result;
       };
-      img.src = event.target.result;
-    };
-    reader.readAsDataURL(file);
+      reader.readAsDataURL(file);
+    }
   };
 
   // PASO 2: Manejar carga de Excel
@@ -737,11 +807,11 @@ function GeneradorCertificados() {
                   </div>
                   <p className="text-xl text-gray-800 font-bold mb-2">Haz clic para seleccionar</p>
                   <p className="text-sm text-gray-500">o arrastra tu archivo aquí</p>
-                  <p className="text-xs text-gray-400 mt-4">PNG, JPG o JPEG • Máximo 10MB</p>
+                  <p className="text-xs text-gray-400 mt-4">PNG, JPG, JPEG o PDF • Máximo 10MB</p>
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/*"
+                    accept="image/*,.pdf,application/pdf"
                     onChange={handleImageUpload}
                     className="hidden"
                   />
