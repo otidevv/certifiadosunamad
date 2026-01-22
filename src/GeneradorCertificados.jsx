@@ -26,11 +26,14 @@ function GeneradorCertificados() {
   // Estados para los diferentes pasos
   const [step, setStep] = useState(1);
   const [backgroundImage, setBackgroundImage] = useState(null);
+  const [backgroundImages, setBackgroundImages] = useState([]); // Para múltiples páginas (anverso/reverso)
+  const [currentPageIndex, setCurrentPageIndex] = useState(0); // 0 = anverso, 1 = reverso
   const [canvasWidth, setCanvasWidth] = useState(2000);
   const [canvasHeight, setCanvasHeight] = useState(1414);
   const [excelData, setExcelData] = useState([]);
   const [excelHeaders, setExcelHeaders] = useState([]);
   const [fields, setFields] = useState([]);
+  const [fieldsPage2, setFieldsPage2] = useState([]); // Campos para el reverso
   const [selectedFieldId, setSelectedFieldId] = useState(null);
   const [previewIndex, setPreviewIndex] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -49,41 +52,55 @@ function GeneradorCertificados() {
   const excelInputRef = useRef(null);
   const backgroundImageRef = useRef(null);
 
-  // Función para convertir la primera página de un PDF a imagen
-  const convertPdfToImage = async (file) => {
+  // Función para convertir todas las páginas de un PDF a imágenes
+  const convertPdfToImages = async (file) => {
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    const page = await pdf.getPage(1);
+    const numPages = pdf.numPages;
+    const pages = [];
 
-    // Calcular escala para obtener 2000px de ancho
-    const originalViewport = page.getViewport({ scale: 1 });
-    const targetWidth = 2000;
-    const scale = targetWidth / originalViewport.width;
-    const viewport = page.getViewport({ scale });
+    // Limitar a máximo 2 páginas (anverso y reverso)
+    const maxPages = Math.min(numPages, 2);
 
-    // Crear canvas para renderizar
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(viewport.width);
-    canvas.height = Math.round(viewport.height);
-    const ctx = canvas.getContext('2d');
+    for (let i = 1; i <= maxPages; i++) {
+      const page = await pdf.getPage(i);
 
-    // Fondo blanco (los PDFs pueden tener transparencia)
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // Calcular escala para obtener 2000px de ancho
+      const originalViewport = page.getViewport({ scale: 1 });
+      const targetWidth = 2000;
+      const scale = targetWidth / originalViewport.width;
+      const viewport = page.getViewport({ scale });
 
-    // Renderizar la página del PDF al canvas
-    await page.render({
-      canvasContext: ctx,
-      viewport: viewport,
-    }).promise;
+      // Crear canvas para renderizar
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(viewport.width);
+      canvas.height = Math.round(viewport.height);
+      const ctx = canvas.getContext('2d');
 
-    // Convertir a base64 PNG
-    const imageData = canvas.toDataURL('image/png');
+      // Fondo blanco (los PDFs pueden tener transparencia)
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Renderizar la página del PDF al canvas
+      await page.render({
+        canvasContext: ctx,
+        viewport: viewport,
+      }).promise;
+
+      // Convertir a base64 PNG
+      const imageData = canvas.toDataURL('image/png');
+
+      pages.push({
+        imageData,
+        width: canvas.width,
+        height: canvas.height,
+        pageNumber: i,
+      });
+    }
 
     return {
-      imageData,
-      width: canvas.width,
-      height: canvas.height,
+      pages,
+      totalPages: numPages,
     };
   };
 
@@ -99,14 +116,25 @@ function GeneradorCertificados() {
       try {
         toast.loading('Procesando PDF...', { id: 'pdf-loading' });
 
-        const result = await convertPdfToImage(file);
+        const result = await convertPdfToImages(file);
 
-        setCanvasWidth(result.width);
-        setCanvasHeight(result.height);
-        setBackgroundImage(result.imageData);
+        // Usar la primera página como imagen principal
+        const firstPage = result.pages[0];
+        setCanvasWidth(firstPage.width);
+        setCanvasHeight(firstPage.height);
+        setBackgroundImage(firstPage.imageData);
+        setBackgroundImages(result.pages);
+        setCurrentPageIndex(0);
 
         toast.dismiss('pdf-loading');
-        toast.success(`✓ PDF cargado: ${result.width}x${result.height}px (página 1)`);
+
+        if (result.pages.length > 1) {
+          toast.success(`✓ PDF cargado: ${result.pages.length} páginas (anverso y reverso)`);
+        } else if (result.totalPages > 2) {
+          toast.success(`✓ PDF cargado: ${firstPage.width}x${firstPage.height}px (solo se usarán las primeras 2 páginas)`);
+        } else {
+          toast.success(`✓ PDF cargado: ${firstPage.width}x${firstPage.height}px`);
+        }
       } catch (error) {
         toast.dismiss('pdf-loading');
         console.error('Error al procesar PDF:', error);
@@ -119,7 +147,7 @@ function GeneradorCertificados() {
         });
       }
     } else {
-      // Procesar archivo de imagen (código existente)
+      // Procesar archivo de imagen (solo una página)
       const reader = new FileReader();
       reader.onload = (event) => {
         const img = new Image();
@@ -138,6 +166,8 @@ function GeneradorCertificados() {
 
           const imageData = canvas.toDataURL('image/png');
           setBackgroundImage(imageData);
+          setBackgroundImages([{ imageData, width: originalWidth, height: originalHeight, pageNumber: 1 }]);
+          setCurrentPageIndex(0);
 
           toast.success(`✓ Imagen cargada: ${originalWidth}x${originalHeight}px`);
         };
@@ -249,8 +279,19 @@ function GeneradorCertificados() {
     { name: 'Cinzel', value: 'Cinzel' },
   ];
 
+  // Helpers para obtener campos de la página actual
+  const getCurrentFields = () => currentPageIndex === 0 ? fields : fieldsPage2;
+  const setCurrentFields = (newFields) => {
+    if (currentPageIndex === 0) {
+      setFields(newFields);
+    } else {
+      setFieldsPage2(newFields);
+    }
+  };
+
   // PASO 3: Agregar nuevo campo (desde el modal)
   const addFieldFromModal = () => {
+    const currentFields = getCurrentFields();
     const newField = {
       id: Date.now(),
       x: canvasWidth / 2,
@@ -266,7 +307,7 @@ function GeneradorCertificados() {
       textAlign: 'center',
       fieldType: newFieldType, // 'data' o 'static'
     };
-    setFields([...fields, newField]);
+    setCurrentFields([...currentFields, newField]);
     setSelectedFieldId(newField.id);
 
     // Cerrar modal y resetear
@@ -275,12 +316,13 @@ function GeneradorCertificados() {
     setNewFieldColumnIndex(0);
     setNewFieldStaticText('');
 
-    toast.success('Campo agregado correctamente');
+    toast.success(`Campo agregado al ${currentPageIndex === 0 ? 'anverso' : 'reverso'}`);
   };
 
   // Eliminar campo
   const deleteField = (id) => {
-    setFields(fields.filter(f => f.id !== id));
+    const currentFields = getCurrentFields();
+    setCurrentFields(currentFields.filter(f => f.id !== id));
     if (selectedFieldId === id) {
       setSelectedFieldId(null);
     }
@@ -289,7 +331,8 @@ function GeneradorCertificados() {
 
   // Actualizar campo
   const updateField = (id, updates) => {
-    setFields(fields.map(f => f.id === id ? { ...f, ...updates } : f));
+    const currentFields = getCurrentFields();
+    setCurrentFields(currentFields.map(f => f.id === id ? { ...f, ...updates } : f));
   };
 
   // Manejo de drag & drop
@@ -301,9 +344,11 @@ function GeneradorCertificados() {
     const mouseX = (e.clientX - rect.left) * scaleX;
     const mouseY = (e.clientY - rect.top) * scaleY;
 
+    const currentFields = getCurrentFields();
+
     // Buscar si se hizo clic en algún campo (en orden inverso para respetar el z-index)
-    for (let i = fields.length - 1; i >= 0; i--) {
-      const field = fields[i];
+    for (let i = currentFields.length - 1; i >= 0; i--) {
+      const field = currentFields[i];
       const text = field.customText || (excelData[0] ? excelData[0][field.columnIndex] : 'Campo');
       const ctx = canvas.getContext('2d');
       const fontStyle = field.fontStyle || 'normal';
@@ -362,12 +407,17 @@ function GeneradorCertificados() {
     setDraggedField(null);
   };
 
+  // Estado para forzar re-render después de cargar imagen
+  const [imageLoaded, setImageLoaded] = useState(0);
+
   // Cargar y cachear la imagen de fondo (solo para fase 3+)
   useEffect(() => {
     if (backgroundImage && step >= 3) {
       const img = new Image();
       img.onload = () => {
         backgroundImageRef.current = img;
+        // Forzar re-render del canvas después de cargar la imagen
+        setImageLoaded(prev => prev + 1);
       };
       img.src = backgroundImage;
     } else if (!backgroundImage) {
@@ -381,6 +431,9 @@ function GeneradorCertificados() {
     if (!canvas || !backgroundImage) return;
 
     const ctx = canvas.getContext('2d');
+
+    // Obtener campos de la página actual
+    const currentFields = currentPageIndex === 0 ? fields : fieldsPage2;
 
     // Para fase 3+, usar imagen cacheada para evitar parpadeo
     if (step >= 3 && backgroundImageRef.current) {
@@ -396,7 +449,7 @@ function GeneradorCertificados() {
         ctx.drawImage(backgroundImageRef.current, 0, 0, canvasWidth, canvasHeight);
 
         // Dibujar campos
-        fields.forEach(field => {
+        currentFields.forEach(field => {
           let text = '';
 
           if (step === 3) {
@@ -458,7 +511,42 @@ function GeneradorCertificados() {
       };
       img.src = backgroundImage;
     }
-  }, [fields, selectedFieldId, step, excelData, previewIndex, backgroundImage, canvasWidth, canvasHeight]);
+  }, [fields, fieldsPage2, currentPageIndex, selectedFieldId, step, excelData, previewIndex, backgroundImage, canvasWidth, canvasHeight, imageLoaded]);
+
+  // Función helper para dibujar campos en un canvas
+  const drawFieldsOnCanvas = (ctx, fieldsToRender, rowData, canvasW, canvasH) => {
+    fieldsToRender.forEach(field => {
+      const text = field.customText || rowData[field.columnIndex] || '';
+      const fontStyle = field.fontStyle || 'normal';
+      const fontWeight = field.fontWeight || 'normal';
+      ctx.font = `${fontStyle} ${fontWeight} ${field.fontSize}px ${field.fontFamily || 'Arial'}`;
+      ctx.fillStyle = field.color;
+
+      // Calcular posición según alineación
+      const metrics = ctx.measureText(text);
+      let textX = field.x;
+      const textAlign = field.textAlign || 'left';
+
+      if (textAlign === 'center') {
+        textX = field.x - metrics.width / 2;
+      } else if (textAlign === 'right') {
+        textX = field.x - metrics.width;
+      }
+
+      ctx.fillText(text, textX, field.y);
+
+      // Dibujar subrayado si está activado
+      if (field.textDecoration === 'underline') {
+        const underlineY = field.y + field.fontSize * 0.1;
+        ctx.beginPath();
+        ctx.strokeStyle = field.color;
+        ctx.lineWidth = Math.max(1, field.fontSize * 0.05);
+        ctx.moveTo(textX, underlineY);
+        ctx.lineTo(textX + metrics.width, underlineY);
+        ctx.stroke();
+      }
+    });
+  };
 
   // PASO 5: Generar todos los certificados
   const generateAllCertificates = async () => {
@@ -466,96 +554,92 @@ function GeneradorCertificados() {
       setIsGenerating(true);
       setGenerationProgress(0);
 
-      console.log('Iniciando generación de', excelData.length, 'certificados');
+      const hasTwoPages = backgroundImages.length > 1;
+      console.log('Iniciando generación de', excelData.length, 'certificados', hasTwoPages ? '(con anverso y reverso)' : '');
 
       const zip = new JSZip();
-      const canvas = document.createElement('canvas');
-      canvas.width = canvasWidth;
-      canvas.height = canvasHeight;
-      const ctx = canvas.getContext('2d');
 
-      const img = new Image();
-      img.src = backgroundImage;
-
-      // Esperar a que la imagen se cargue
-      await new Promise((resolve) => {
-        img.onload = resolve;
+      // Cargar imágenes de fondo
+      const loadImage = (src) => new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.src = src;
       });
 
-      console.log('Imagen cargada, comenzando a generar certificados...');
+      // Cargar primera página (anverso)
+      const page1 = backgroundImages[0];
+      const img1 = await loadImage(page1.imageData);
+
+      // Cargar segunda página (reverso) si existe
+      let img2 = null;
+      let page2 = null;
+      if (hasTwoPages) {
+        page2 = backgroundImages[1];
+        img2 = await loadImage(page2.imageData);
+      }
+
+      console.log('Imágenes cargadas, comenzando a generar certificados...');
 
       // Generar cada certificado
       for (let i = 0; i < excelData.length; i++) {
         const rowData = excelData[i];
 
-        // Limpiar canvas
-        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+        // Crear canvas para página 1 (anverso)
+        const canvas1 = document.createElement('canvas');
+        canvas1.width = page1.width;
+        canvas1.height = page1.height;
+        const ctx1 = canvas1.getContext('2d');
 
-        // Agregar fondo blanco para PNG con transparencia
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+        // Dibujar página 1
+        ctx1.fillStyle = 'white';
+        ctx1.fillRect(0, 0, canvas1.width, canvas1.height);
+        ctx1.drawImage(img1, 0, 0, canvas1.width, canvas1.height);
+        drawFieldsOnCanvas(ctx1, fields, rowData, canvas1.width, canvas1.height);
 
-        // Dibujar imagen de fondo
-        ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
+        const imgData1 = canvas1.toDataURL('image/jpeg', 0.85);
 
-        // Dibujar cada campo de texto
-        fields.forEach(field => {
-          const text = field.customText || rowData[field.columnIndex] || '';
-          const fontStyle = field.fontStyle || 'normal';
-          const fontWeight = field.fontWeight || 'normal';
-          ctx.font = `${fontStyle} ${fontWeight} ${field.fontSize}px ${field.fontFamily || 'Arial'}`;
-          ctx.fillStyle = field.color;
+        // Detectar orientación basándose en las dimensiones
+        const orientation1 = page1.width > page1.height ? 'landscape' : 'portrait';
 
-          // Calcular posición según alineación
-          const metrics = ctx.measureText(text);
-          let textX = field.x;
-          const textAlign = field.textAlign || 'left';
-
-          if (textAlign === 'center') {
-            textX = field.x - metrics.width / 2;
-          } else if (textAlign === 'right') {
-            textX = field.x - metrics.width;
-          }
-
-          ctx.fillText(text, textX, field.y);
-
-          // Dibujar subrayado si está activado
-          if (field.textDecoration === 'underline') {
-            const underlineY = field.y + field.fontSize * 0.1;
-            ctx.beginPath();
-            ctx.strokeStyle = field.color;
-            ctx.lineWidth = Math.max(1, field.fontSize * 0.05);
-            ctx.moveTo(textX, underlineY);
-            ctx.lineTo(textX + metrics.width, underlineY);
-            ctx.stroke();
-          }
-        });
-
-        // Convertir canvas a imagen base64 (JPEG con compresión para reducir tamaño)
-        const imgData = canvas.toDataURL('image/jpeg', 0.85);
-
-        // Detectar orientación basándose en las dimensiones del canvas
-        const orientation = canvasWidth > canvasHeight ? 'landscape' : 'portrait';
-
-        // Crear PDF con jsPDF (orientación automática según imagen)
+        // Crear PDF
         const pdf = new jsPDF({
-          orientation: orientation,
+          orientation: orientation1,
           unit: 'mm',
           format: 'a4'
         });
 
-        // Calcular dimensiones para ajustar la imagen al PDF
-        const pdfWidth = pdf.internal.pageSize.getWidth();
-        const pdfHeight = pdf.internal.pageSize.getHeight();
+        const pdfWidth1 = pdf.internal.pageSize.getWidth();
+        const pdfHeight1 = pdf.internal.pageSize.getHeight();
+        pdf.addImage(imgData1, 'JPEG', 0, 0, pdfWidth1, pdfHeight1);
 
-        // Agregar imagen al PDF (JPEG para menor tamaño de archivo)
-        pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+        // Si hay segunda página (reverso), agregarla
+        if (hasTwoPages && img2 && page2) {
+          const canvas2 = document.createElement('canvas');
+          canvas2.width = page2.width;
+          canvas2.height = page2.height;
+          const ctx2 = canvas2.getContext('2d');
+
+          // Dibujar página 2
+          ctx2.fillStyle = 'white';
+          ctx2.fillRect(0, 0, canvas2.width, canvas2.height);
+          ctx2.drawImage(img2, 0, 0, canvas2.width, canvas2.height);
+          drawFieldsOnCanvas(ctx2, fieldsPage2, rowData, canvas2.width, canvas2.height);
+
+          const imgData2 = canvas2.toDataURL('image/jpeg', 0.85);
+
+          // Agregar segunda página al PDF
+          const orientation2 = page2.width > page2.height ? 'landscape' : 'portrait';
+          pdf.addPage('a4', orientation2);
+
+          const pdfWidth2 = pdf.internal.pageSize.getWidth();
+          const pdfHeight2 = pdf.internal.pageSize.getHeight();
+          pdf.addImage(imgData2, 'JPEG', 0, 0, pdfWidth2, pdfHeight2);
+        }
 
         // Convertir PDF a blob
         const pdfBlob = pdf.output('blob');
 
         // Generar nombre de archivo usando las 4 columnas obligatorias
-        // Formato: numero_secuencial_numero_documento_nombre_completo_(cargo).pdf
         const numeroSecuencial = rowData[0] ? String(rowData[0]).trim() : i + 1;
         const numeroDocumento = rowData[1] ? String(rowData[1]).trim() : '';
         const nombreCompleto = rowData[2] ? String(rowData[2]).trim() : '';
@@ -572,7 +656,7 @@ function GeneradorCertificados() {
         // Actualizar progreso
         setGenerationProgress(i + 1);
 
-        console.log(`Certificado ${i + 1}/${excelData.length} generado: ${fileName}`);
+        console.log(`Certificado ${i + 1}/${excelData.length} generado: ${fileName}${hasTwoPages ? ' (2 páginas)' : ''}`);
       }
 
       console.log('Todos los certificados generados, creando ZIP...');
@@ -603,7 +687,7 @@ function GeneradorCertificados() {
       setIsGenerating(false);
 
       // Toast de éxito
-      toast.success(`¡${excelData.length} certificados generados exitosamente! 🎉`, {
+      toast.success(`¡${excelData.length} certificados generados exitosamente!${hasTwoPages ? ' (con anverso y reverso)' : ''} 🎉`, {
         duration: 4000,
       });
     } catch (error) {
@@ -726,9 +810,12 @@ function GeneradorCertificados() {
             if (result.isConfirmed) {
               setStep(1);
               setBackgroundImage(null);
+              setBackgroundImages([]);
+              setCurrentPageIndex(0);
               setExcelData([]);
               setExcelHeaders([]);
               setFields([]);
+              setFieldsPage2([]);
               setSelectedFieldId(null);
               setPreviewIndex(0);
               toast.success('Proyecto reiniciado correctamente');
@@ -821,10 +908,48 @@ function GeneradorCertificados() {
               <div className="flex-1 flex flex-col items-center justify-center w-full">
                 <div className="text-center mb-4">
                   <div className="inline-block bg-green-100 text-green-700 px-4 py-2 rounded-full text-sm font-semibold mb-2">
-                    ✓ Imagen cargada correctamente
+                    ✓ {backgroundImages.length > 1 ? `PDF con ${backgroundImages.length} páginas cargado` : 'Imagen cargada correctamente'}
                   </div>
                   <p className="text-gray-600 text-sm">Dimensiones: {canvasWidth}x{canvasHeight}px</p>
                 </div>
+
+                {/* Tabs para anverso/reverso si hay 2 páginas */}
+                {backgroundImages.length > 1 && (
+                  <div className="flex gap-2 mb-4">
+                    <button
+                      onClick={() => {
+                        setCurrentPageIndex(0);
+                        const page = backgroundImages[0];
+                        setBackgroundImage(page.imageData);
+                        setCanvasWidth(page.width);
+                        setCanvasHeight(page.height);
+                      }}
+                      className={`px-6 py-3 rounded-xl font-semibold transition-all ${
+                        currentPageIndex === 0
+                          ? 'bg-purple-600 text-white shadow-lg'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      Anverso (Página 1)
+                    </button>
+                    <button
+                      onClick={() => {
+                        setCurrentPageIndex(1);
+                        const page = backgroundImages[1];
+                        setBackgroundImage(page.imageData);
+                        setCanvasWidth(page.width);
+                        setCanvasHeight(page.height);
+                      }}
+                      className={`px-6 py-3 rounded-xl font-semibold transition-all ${
+                        currentPageIndex === 1
+                          ? 'bg-purple-600 text-white shadow-lg'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      Reverso (Página 2)
+                    </button>
+                  </div>
+                )}
 
                 <div className="mb-8 bg-white shadow-2xl rounded-2xl p-3 ring-1 ring-gray-200">
                   <canvas
@@ -840,6 +965,8 @@ function GeneradorCertificados() {
                   <button
                     onClick={() => {
                       setBackgroundImage(null);
+                      setBackgroundImages([]);
+                      setCurrentPageIndex(0);
                       if (fileInputRef.current) {
                         fileInputRef.current.value = '';
                       }
@@ -1100,23 +1227,68 @@ function GeneradorCertificados() {
           <>
             {/* Panel lateral izquierdo */}
             <aside className="w-80 bg-white border-r border-gray-200 flex flex-col overflow-hidden">
+              {/* Tabs para anverso/reverso si hay 2 páginas */}
+              {backgroundImages.length > 1 && (
+                <div className="p-3 border-b border-gray-200 bg-gray-50">
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => {
+                        setCurrentPageIndex(0);
+                        setSelectedFieldId(null);
+                        const page = backgroundImages[0];
+                        setBackgroundImage(page.imageData);
+                        setCanvasWidth(page.width);
+                        setCanvasHeight(page.height);
+                      }}
+                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-semibold transition-all ${
+                        currentPageIndex === 0
+                          ? 'bg-purple-600 text-white shadow-md'
+                          : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
+                      }`}
+                    >
+                      Anverso
+                    </button>
+                    <button
+                      onClick={() => {
+                        setCurrentPageIndex(1);
+                        setSelectedFieldId(null);
+                        const page = backgroundImages[1];
+                        setBackgroundImage(page.imageData);
+                        setCanvasWidth(page.width);
+                        setCanvasHeight(page.height);
+                      }}
+                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-semibold transition-all ${
+                        currentPageIndex === 1
+                          ? 'bg-purple-600 text-white shadow-md'
+                          : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
+                      }`}
+                    >
+                      Reverso
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="p-4 border-b border-gray-200">
                 <button
                   onClick={() => setShowAddFieldModal(true)}
                   className="w-full bg-purple-600 text-white px-4 py-3 rounded-lg hover:bg-purple-700 transition-colors font-semibold flex items-center justify-center gap-2"
                 >
                   <Plus className="w-5 h-5" />
-                  Agregar Campo
+                  Agregar Campo {backgroundImages.length > 1 ? `(${currentPageIndex === 0 ? 'Anverso' : 'Reverso'})` : ''}
                 </button>
               </div>
 
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {fields.length === 0 ? (
+                {getCurrentFields().length === 0 ? (
                   <div className="text-center text-gray-400 mt-8">
                     <p className="text-sm">Agrega campos para comenzar</p>
+                    {backgroundImages.length > 1 && (
+                      <p className="text-xs mt-2">Editando: {currentPageIndex === 0 ? 'Anverso' : 'Reverso'}</p>
+                    )}
                   </div>
                 ) : (
-                  fields.map((field) => (
+                  getCurrentFields().map((field) => (
                     <div
                       key={field.id}
                       className={`border rounded-lg p-3 cursor-pointer transition-all ${
@@ -1178,7 +1350,8 @@ function GeneradorCertificados() {
               <div className="p-4 border-t border-gray-200 space-y-2">
                 <button
                   onClick={async () => {
-                    if (fields.length === 0) {
+                    const totalFields = fields.length + fieldsPage2.length;
+                    if (totalFields === 0) {
                       await Swal.fire({
                         title: 'Sin campos',
                         text: 'Debes agregar al menos un campo de texto',
@@ -1187,6 +1360,14 @@ function GeneradorCertificados() {
                         confirmButtonText: 'Entendido'
                       });
                       return;
+                    }
+                    // Volver al anverso para la vista previa
+                    if (backgroundImages.length > 1) {
+                      setCurrentPageIndex(0);
+                      const page = backgroundImages[0];
+                      setBackgroundImage(page.imageData);
+                      setCanvasWidth(page.width);
+                      setCanvasHeight(page.height);
                     }
                     setStep(4);
                   }}
@@ -1209,7 +1390,7 @@ function GeneradorCertificados() {
               {selectedFieldId && (
                 <div className="mb-4 bg-white rounded-xl shadow-2xl border border-gray-200 p-2 flex items-center gap-1">
                   {(() => {
-                    const selectedField = fields.find(f => f.id === selectedFieldId);
+                    const selectedField = getCurrentFields().find(f => f.id === selectedFieldId);
                     if (!selectedField) return null;
 
                     return (
@@ -1405,6 +1586,11 @@ function GeneradorCertificados() {
                 <p className="text-sm text-gray-500">
                   {excelData[previewIndex][0]}
                 </p>
+                {backgroundImages.length > 1 && (
+                  <p className="text-xs text-purple-600 font-medium mt-1">
+                    Viendo: {currentPageIndex === 0 ? 'Anverso' : 'Reverso'}
+                  </p>
+                )}
               </div>
 
               <button
@@ -1415,6 +1601,46 @@ function GeneradorCertificados() {
                 <ChevronRight className="w-6 h-6" />
               </button>
             </div>
+
+            {/* Tabs para anverso/reverso si hay 2 páginas */}
+            {backgroundImages.length > 1 && (
+              <div className="bg-gray-50 border-b border-gray-200 px-8 py-3 flex justify-center">
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setCurrentPageIndex(0);
+                      const page = backgroundImages[0];
+                      setBackgroundImage(page.imageData);
+                      setCanvasWidth(page.width);
+                      setCanvasHeight(page.height);
+                    }}
+                    className={`px-6 py-2 rounded-lg font-semibold transition-all ${
+                      currentPageIndex === 0
+                        ? 'bg-purple-600 text-white shadow-md'
+                        : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
+                    }`}
+                  >
+                    Anverso
+                  </button>
+                  <button
+                    onClick={() => {
+                      setCurrentPageIndex(1);
+                      const page = backgroundImages[1];
+                      setBackgroundImage(page.imageData);
+                      setCanvasWidth(page.width);
+                      setCanvasHeight(page.height);
+                    }}
+                    className={`px-6 py-2 rounded-lg font-semibold transition-all ${
+                      currentPageIndex === 1
+                        ? 'bg-purple-600 text-white shadow-md'
+                        : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
+                    }`}
+                  >
+                    Reverso
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Canvas centrado */}
             <div className="flex-1 bg-gray-100 flex items-center justify-center p-8">
@@ -1467,6 +1693,9 @@ function GeneradorCertificados() {
                   <div className="bg-gradient-to-br from-purple-500 to-purple-700 rounded-2xl p-12 text-white shadow-2xl">
                     <div className="text-7xl font-bold mb-4">{excelData.length}</div>
                     <p className="text-xl opacity-90">Certificados</p>
+                    {backgroundImages.length > 1 && (
+                      <p className="text-sm opacity-75 mt-2">Con anverso y reverso</p>
+                    )}
                   </div>
 
                   <button
@@ -1482,8 +1711,14 @@ function GeneradorCertificados() {
                     <ul className="text-sm text-purple-800 space-y-2">
                       <li className="flex items-start gap-2">
                         <span className="text-purple-600">•</span>
-                        <span>Formato: ZIP con archivos PDF (A4 {canvasWidth > canvasHeight ? 'horizontal' : 'vertical'})</span>
+                        <span>Formato: ZIP con archivos PDF {backgroundImages.length > 1 ? '(2 páginas por certificado)' : `(A4 ${canvasWidth > canvasHeight ? 'horizontal' : 'vertical'})`}</span>
                       </li>
+                      {backgroundImages.length > 1 && (
+                        <li className="flex items-start gap-2">
+                          <span className="text-purple-600">•</span>
+                          <span>Páginas: Anverso ({fields.length} campos) + Reverso ({fieldsPage2.length} campos)</span>
+                        </li>
+                      )}
                       <li className="flex items-start gap-2">
                         <span className="text-purple-600">•</span>
                         <span>Resolución: Calidad profesional apta para impresión</span>
@@ -1494,7 +1729,7 @@ function GeneradorCertificados() {
                       </li>
                       <li className="flex items-start gap-2">
                         <span className="text-purple-600">•</span>
-                        <span>Tiempo estimado: {Math.ceil(excelData.length / 5)} segundos</span>
+                        <span>Tiempo estimado: {Math.ceil(excelData.length / (backgroundImages.length > 1 ? 3 : 5))} segundos</span>
                       </li>
                     </ul>
                   </div>
@@ -1510,9 +1745,12 @@ function GeneradorCertificados() {
                       onClick={() => {
                         setStep(1);
                         setBackgroundImage(null);
+                        setBackgroundImages([]);
+                        setCurrentPageIndex(0);
                         setExcelData([]);
                         setExcelHeaders([]);
                         setFields([]);
+                        setFieldsPage2([]);
                         setSelectedFieldId(null);
                         setPreviewIndex(0);
                       }}
