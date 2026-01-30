@@ -46,6 +46,7 @@ function GeneradorCertificados() {
   const [newFieldType, setNewFieldType] = useState('data'); // 'data' o 'static'
   const [newFieldColumnIndex, setNewFieldColumnIndex] = useState(0);
   const [newFieldStaticText, setNewFieldStaticText] = useState('');
+  const [newFieldAlignment, setNewFieldAlignment] = useState('left'); // 'left' o 'center'
 
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -304,7 +305,7 @@ function GeneradorCertificados() {
       fontWeight: 'normal',
       fontStyle: 'normal',
       textDecoration: 'none',
-      textAlign: 'center',
+      textAlign: newFieldAlignment,
       fieldType: newFieldType, // 'data' o 'static'
     };
     setCurrentFields([...currentFields, newField]);
@@ -315,6 +316,7 @@ function GeneradorCertificados() {
     setNewFieldType('data');
     setNewFieldColumnIndex(0);
     setNewFieldStaticText('');
+    setNewFieldAlignment('left');
 
     toast.success(`Campo agregado al ${currentPageIndex === 0 ? 'anverso' : 'reverso'}`);
   };
@@ -1881,6 +1883,45 @@ function GeneradorCertificados() {
                     />
                   </div>
                 )}
+
+                {/* Opciones de alineación */}
+                <div className="mt-4">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Alineación del texto:
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewFieldAlignment('left')}
+                      className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 transition-all ${
+                        newFieldAlignment === 'left'
+                          ? 'border-purple-500 bg-purple-50 text-purple-700'
+                          : 'border-gray-300 hover:border-purple-300 text-gray-700'
+                      }`}
+                    >
+                      <AlignLeft className="w-4 h-4" />
+                      <span className="font-medium text-sm">Izquierda</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewFieldAlignment('center')}
+                      className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 transition-all ${
+                        newFieldAlignment === 'center'
+                          ? 'border-purple-500 bg-purple-50 text-purple-700'
+                          : 'border-gray-300 hover:border-purple-300 text-gray-700'
+                      }`}
+                    >
+                      <AlignCenter className="w-4 h-4" />
+                      <span className="font-medium text-sm">Centrado</span>
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">
+                    {newFieldAlignment === 'left'
+                      ? 'El texto iniciará desde la posición del campo hacia la derecha'
+                      : 'El texto se centrará en la posición del campo'
+                    }
+                  </p>
+                </div>
               </div>
             </div>
 
